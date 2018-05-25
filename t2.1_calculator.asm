@@ -163,21 +163,23 @@ print_status:
 is_num:
 	addi $sp, $sp, -4 # Save return addr on stack for subcall
 	sw $ra, 0($sp)
-	jal get_current_char
+	jal get_current_char # Get current character
 	lw $ra, 0($sp) # Restore ra
 	addi $sp, $sp, 4
 	
 	# Current char is not a number if x < 48 or x > 57
 	blt $v0, 48, is_not_num
 	bgt $v0, 57, is_not_num
-	addi $v0, $0, 1
+	addi $v0, $0, 1 # If character is a number, return 1
 	jr $ra
 	
 	is_not_num:
-	add $v0, $0, $0
+	add $v0, $0, $0 # if character is not a number, return 0
 	jr $ra
 	
-	
+# Arguments: none
+# Return values: number read from input
+# Assuming the current character is a valid digit
 read_num:
 	# Save $s1 and $ra to stack
 	addi $sp, $sp, -8
@@ -185,53 +187,59 @@ read_num:
 	sw $s1, 4($sp)
 	add $s1, $0, $0
 	
-	read_num_loop:
-	jal get_current_char
+	# t2 will be the number already read
 	
-	# Multiply what's already read by 10 (shifting 1 digit in decimal)
+	read_num_loop:
+	jal get_current_char 
+	
+	# Multiply what's already read by 10 (shifting 1 digit in decimal to make space for the next digit)
 	# By shifting 3 bits (= * 8) and adding itself two times
 	sll $t2, $s1, 3
 	add $t2, $t2, $s1
 	add $s1, $s1, $t2
 	
-	# Convert current char to decimal digits
+	# Convert current char to decimal digits by subtracting 48 from ascii code
 	addi $t2, $v0, -48
 	# Add to aggregate result
 	add $s1, $s1, $t2
 	
-	jal advance_cursor
+	jal advance_cursor # Move cursor to next character
 	jal is_num
-	bgtz $v0, read_num_loop
+	bgtz $v0, read_num_loop # If the next character still is a number, read it in, too
 	
-	read_num_done:
-	add $v0, $0, $s1
+	# Done reading number
+	add $v0, $0, $s1 # Set result
 	# Restore return address and $s1 from stack
 	lw $ra, 0($sp)
 	lw $s1, 4($sp)
 	addi $sp, $sp, 8
 	jr $ra
 	
+# Arguments: none
+# Return value: Value of the factor starting at the current character in v0, 1 in v1 on error, 0 otherwise
 parse_factor:
 	# Save $ra to stack
 	addi $sp, $sp, -8
 	sw $ra, 0($sp)
 	sw $s0, 4($sp)
 
-	# Return error if no number is present
+	# If the first character is not a number, check if it is an open bracket
 	jal is_num
 	beqz $v0, parse_factor_not_num
-	# Return v0 and 0 in v1 for no error
+	# Otherwise, read the number
 	jal read_num
-	add $v1, $0, $0
+	add $v1, $0, $0 
 	j parse_factor_done
 	
 	parse_factor_not_num:
 	jal get_current_char
-	beq $v0, 40, parse_factor_bracket
+	beq $v0, 40, parse_factor_bracket # If current char is open bracket (ascii 40), parse the bracketed expression
+	
 	parse_factor_error:
 	# Return error
 	li $v1, 1
 	add $v0, $0, $0
+	
 	parse_factor_done:
 	# Load return address from stack and return
 	lw $ra, 0($sp)
@@ -240,31 +248,29 @@ parse_factor:
 	jr $ra
 	
 	parse_factor_bracket:
-	jal advance_cursor
+	jal advance_cursor # Move cursor to the char after the open bracket
 	jal parse_expression # Parse expression in bracket
 	bgtz $v1, parse_factor_error # Return error on exp error
 	add $s0, $v0, $0 # Save exp result
-	jal get_current_char 
-	bne $v0, 41, parse_factor_error # Check if next char is closing bracket
-	jal advance_cursor
+	jal get_current_char # After parse_exp, the cursor is at the first character that was not recognized by parse_exp
+	bne $v0, 41, parse_factor_error # Check if next char is closing bracket, if not, return error
+	jal advance_cursor 
 	add $v0, $s0, $0
 	add $v1, $0, $0
 	j parse_factor_done 
 	
 	
-	
+# Arguments: none
+# Return values: Value of the term (single number or product) starting at the current char in v0, error code in v1
 parse_term:
 	# Save $ra, $s0 to stack
 	addi $sp, $sp, -8
 	sw $ra, 0($sp)
 	sw $s0, 4($sp)
 	
-	# Init operands to zero
-	add $s0, $0, $0
-	
-	jal parse_factor # Read first number to $s0
-	bgtz $v1, parse_term_error
-	add $s0, $v0, $0
+	jal parse_factor # Read first number
+	bgtz $v1, parse_term_error # Return error on parse_factor error
+	add $s0, $v0, $0 # Init term value to value of first number
 	
 	parse_term_loop:
 	
@@ -278,24 +284,24 @@ parse_term:
 	j parse_term_done
 	
 	parse_term_mult:
-	jal advance_cursor
+	jal advance_cursor # Move cursor past operator
 	jal parse_factor # Get next number
 	bgtz $v1, parse_term_error # Error on invalid number
-	mult $s0, $v0
+	mult $s0, $v0 # Perform multiplication
 	mflo $s0
 	j parse_term_loop
 	
 	parse_term_div:
-	jal advance_cursor
+	jal advance_cursor # Move cursor past operator
 	jal parse_factor # Get next number
 	bgtz $v1, parse_term_error # Error on invalid number
-	div $s0, $v0
-	mflo $s0
+	div $s0, $v0 # Perform division
+	mflo $s0 # Integer result is stored in $lo
 	j parse_term_loop
 	
 	parse_term_error:
 	li $v1, 1
-	add $v0, $0, $0
+	add $v0, $0, $0 # No need to jump here because we automatically continue to parse_term_done
 	
 	parse_term_done:
 	# Load return address and $s0 from stack and return
@@ -304,18 +310,16 @@ parse_term:
 	addi $sp, $sp, 8
 	jr $ra
 
+# Arguments: none
+# Return values: Value of the expression (single number, product or sum) starting at the current char, error code in v1 
 parse_expression:
 	# Save $ra, $s0 to stack
 	addi $sp, $sp, -8
 	sw $ra, 0($sp)
 	sw $s0, 4($sp)
 	
-	# Init operands to zero
-	add $s0, $0, $0
-	add $s1, $0, $0
-	
 	jal parse_term # Read first evaluated term to $s0
-	bgtz $v1, parse_exp_error
+	bgtz $v1, parse_exp_error # Return error on parse_term error
 	add $s0, $v0, $0
 	
 	parse_exp_loop:
@@ -331,17 +335,17 @@ parse_expression:
 	j parse_exp_done
 	
 	parse_exp_add:
-	jal advance_cursor
-	jal parse_term # Get next number
-	bgtz $v1, parse_exp_error # Error on invalid number
-	add $s0, $s0, $v0
+	jal advance_cursor # Move cursor past operator
+	jal parse_term # Get next evaluated term
+	bgtz $v1, parse_exp_error # Error on parse_term error
+	add $s0, $s0, $v0 # Perform addition
 	j parse_exp_loop
 	
 	parse_exp_sub:
-	jal advance_cursor
+	jal advance_cursor # Move cursor past operator
 	jal parse_term # Get next number
-	bgtz $v1, parse_exp_error # Error on invalid number
-	sub $s0, $s0, $v0
+	bgtz $v1, parse_exp_error # Error on parse_term error
+	sub $s0, $s0, $v0 # Perform subtraction
 	j parse_exp_loop
 	
 	parse_exp_error:
@@ -366,7 +370,7 @@ handle_one_line:
 	
 	jal parse_expression
 
-	bgtz $v1 handle_line_error
+	bgtz $v1 handle_line_error # Print error message on parse error
 	
 	# Print result
 	add $a0, $v0, $0
