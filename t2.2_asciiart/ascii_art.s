@@ -29,66 +29,70 @@
 
 .data
 
-    format_b2w: .string "@@BBRR**##$$PPXX00ZZLLqqllwwooIIccvv::++??||!!==~~--..,,   "
+	format_b2w: .string "@@BBRR**##$$PPXX00ZZLLqqllwwooIIccvv::++??||!!==~~--..,,   "
+	multiply_const: .float 0.22745098
+	four: .float 4.0
 
 /* ************************************************************************** */
 
 .bss
 
-    /* local variables */
-    .lcomm fpu_exchg, 4
-    .lcomm out_cursor, 4
+	/* local variables */
+	.lcomm fpu_exchg, 4
+	.lcomm out_cursor, 4
 
-    /* global variables */
+	/* global variables */
 	.comm in_width, 4
 	.comm in_height, 4
 	.comm in_length, 4
-    .comm in_max, 4
+	.comm in_max, 4
 	.comm in_buffer, 4194304
 
 	.comm out_width, 4
 	.comm out_height, 4
 	.comm out_length, 4
-    .comm out_max, 4
+	.comm out_max, 4
 	.comm out_buffer, 4194304
 
-    .comm out_ascii_buffer, 4194304
+	.comm out_ascii_buffer, 4194304
 
 /* ************************************************************************** */
 
 .text
 
 	.global main
-    .global end
+	.global end
 
 	main:
-        /* read input file */
+	movl %esp, %ebp #for correct debugging
+		/* read input file */
 		call read_input
 
-        /* copy maximum value */
-        movl in_max, %eax
-        movl %eax, out_max
+		/* copy maximum value */
+		movl in_max, %eax
+		movl %eax, out_max
 
-        /**
-         * YOUR WORK STARTS HERE!
-         */
+		/**
+		 * YOUR WORK STARTS HERE!
+		 */
 
-        /* TODO: 1.2 - replace with call to downsample_image */
-        call copy_image
+		/* TODO: 1.2 - replace with call to downsample_image */
+		call downsample_image
 
-        /* TODO: 1.1 - implement convert_ascii and call */
+		/* TODO: 1.1 - implement convert_ascii and call */
+		call convert_ascii
 
-        /**
-         * YOUR WORK ENDS HERE!
-         */
+		/**
+		 * YOUR WORK ENDS HERE!
+		 */
 
-        /* write output file */
-        call write_output
+		/* write output file */
+		call write_output
 
-        /* write ascii code */
-        call write_ascii
+		/* write ascii code */
+		call write_ascii
 
-        pushl $0
+		pushl $0
 		jmp end
 
 	/* ********************************************************************** */
@@ -99,26 +103,136 @@
 		popl %ebx
 		int $0x80
 
-    /* ********************************************************************** */
+	/* ********************************************************************** */
 
-    downsample_doublepixel:
+	downsample_doublepixel:
 
-        /* TODO: 1.2 a) - implement */
+		# Create local base pointer
+		pushl %ebp
+		movl %esp, %ebp
 
-        ret
+		# Save registers
+		pushl %ebx
+		pushl %ecx
+		pushl %edx
 
-    /* ********************************************************************** */
+		# Load block addr 
+		movl 8(%ebp), %ecx
+		
+		xor %eax, %eax
+		xor %ebx, %ebx
+		xor %edx, %edx
 
-    downsample_image:
+		movb (%ecx), %al
+		movb 1(%ecx), %dl
+		add %edx, %eax
 
-        /* TODO: 1.2 b) - implement */
+		movb 2(%ecx), %bl
+		movb 3(%ecx), %dl
+		add %edx, %ebx
+		
+		add in_width, %ecx
+		
+		movb (%ecx), %dl
+		add %edx, %eax
+		movb 1(%ecx), %dl
+		add %edx, %eax
+		
+		movb 2(%ecx), %dl
+		add %edx, %ebx
+		movb 3(%ecx), %dl
+		add %edx, %ebx
+		
+		movl %eax, fpu_exchg
+		xor %eax, %eax
+		fild fpu_exchg
+		fdiv four
+		frndint
+		fistp fpu_exchg
+		movl fpu_exchg, %eax
+		
+		movl %ebx, fpu_exchg
+		fild fpu_exchg
+		fdiv four
+		frndint
+		fistp fpu_exchg
+		movl fpu_exchg, %ebx
+		
+		movb %bl, %ah
+		
+		popl %edx
+		popl %ebx
+		popl %ecx
+		popl %ebp
 
-        ret
+		ret
 
-    /* ********************************************************************** */
+	/* ********************************************************************** */
 
-    convert_ascii:
+	downsample_image:
 
-        /* TODO: 1.1 - implement */
+		# Create local base pointer
+		pushl %ebp
+		movl %esp, %ebp
 
-        ret
+		# Save registers
+		pushl %ebx
+		pushl %ecx
+		pushl %edx
+
+		movl in_width, %ebx
+		shr %ebx
+		movl %ebx, out_width
+
+		movl in_height, %ebx
+		shr %ebx
+		movl %ebx, out_height
+
+		# Calculate image length
+		imul out_width, %ebx
+		movl %ebx, out_length
+
+		popl %edx
+		popl %ebx
+		popl %ecx
+		popl %ebp
+
+		ret
+
+	/* ********************************************************************** */
+
+	convert_ascii:
+
+		pushl %ecx
+		pushl %eax
+		
+		# Calculate image length (not initialized for some reason?)
+		movl in_width, %ecx
+		imul in_height, %ecx
+		movl %ecx, in_length
+		xor %ecx, %ecx
+		
+		# Load conversion constant to FPU
+		fld multiply_const
+		
+		conv_ascii_loop:
+		# Load next byte to lowest byte of fpu_exchg, set rest to zero (to deal with unwanted 2's complement expansion)
+		xor %eax, %eax
+		movb in_buffer(%ecx), %al
+		movl %eax, fpu_exchg
+		fild fpu_exchg # Load byte value into FPU
+		fmul %st(1), %st # Multiply by conversion factor (st(1))
+		frndint # Round to integer
+		fistp fpu_exchg # Read integer and pop
+		
+		movl fpu_exchg, %eax
+		movb format_b2w(%eax), %al # Get char corresponding to result
+		movb %al, out_ascii_buffer(%ecx) # Write to output buffer
+		add $1, %ecx # Increment byte position
+		cmp %ecx, in_length
+		jne conv_ascii_loop # Loop if not done
+
+		popl %eax
+		popl %ecx
+
+		ret
