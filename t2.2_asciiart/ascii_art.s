@@ -78,6 +78,7 @@
 
 		/* TODO: 1.2 - replace with call to downsample_image */
 		call downsample_image
+		#call copy_image
 
 		/* TODO: 1.1 - implement convert_ascii and call */
 		call convert_ascii
@@ -161,8 +162,8 @@
 		movb %bl, %ah
 		
 		popl %edx
-		popl %ebx
 		popl %ecx
+		popl %ebx
 		popl %ebp
 
 		ret
@@ -179,6 +180,7 @@
 		pushl %ebx
 		pushl %ecx
 		pushl %edx
+		pushl %eax
 
 		movl in_width, %ebx
 		shr %ebx
@@ -192,6 +194,48 @@
 		imul out_width, %ebx
 		movl %ebx, out_length
 
+		xor %ecx, %ecx
+		downsample_outer:
+		xor %ebx, %ebx
+			downsample_inner:
+
+			mov out_width, %edx
+			imul %ecx, %edx
+			pushl %edx
+
+			movl %ebx, %eax
+			shl %eax
+			shl $2, %edx
+			addl %edx, %eax
+			lea in_buffer, %edx
+			add %edx, %eax
+
+			popl %edx
+
+			pushl %eax
+			call downsample_doublepixel
+			#addl $3, %ebx
+			movb %al, out_buffer(%edx, %ebx)
+			addl $1, %ebx
+			movb %ah, out_buffer(%edx, %ebx)
+			addl $1, %ebx
+
+			addl $4, (%esp)
+
+			call downsample_doublepixel
+			movb %al, out_buffer(%edx, %ebx)
+			addl $1, %ebx
+			movb %ah, out_buffer(%edx, %ebx)
+
+			addl $4, %esp
+			addl $1, %ebx
+			cmp out_width, %ebx
+			jne downsample_inner
+		addl $1, %ecx
+		cmp out_height, %ecx
+		jne downsample_outer
+
+		popl %eax
 		popl %edx
 		popl %ebx
 		popl %ecx
@@ -206,10 +250,6 @@
 		pushl %ecx
 		pushl %eax
 		
-		# Calculate image length (not initialized for some reason?)
-		movl in_width, %ecx
-		imul in_height, %ecx
-		movl %ecx, in_length
 		xor %ecx, %ecx
 		
 		# Load conversion constant to FPU
@@ -218,7 +258,7 @@
 		conv_ascii_loop:
 		# Load next byte to lowest byte of fpu_exchg, set rest to zero (to deal with unwanted 2's complement expansion)
 		xor %eax, %eax
-		movb in_buffer(%ecx), %al
+		movb out_buffer(%ecx), %al
 		movl %eax, fpu_exchg
 		fild fpu_exchg # Load byte value into FPU
 		fmul %st(1), %st # Multiply by conversion factor (st(1))
@@ -229,7 +269,7 @@
 		movb format_b2w(%eax), %al # Get char corresponding to result
 		movb %al, out_ascii_buffer(%ecx) # Write to output buffer
 		add $1, %ecx # Increment byte position
-		cmp %ecx, in_length
+		cmp %ecx, out_length
 		jne conv_ascii_loop # Loop if not done
 
 		popl %eax
